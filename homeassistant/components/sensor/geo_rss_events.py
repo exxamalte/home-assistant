@@ -15,6 +15,7 @@ from datetime import timedelta
 import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
+from homeassistant.components.geo_rss_events import GeoDistanceHelper
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.const import (
     STATE_UNKNOWN, CONF_UNIT_OF_MEASUREMENT, CONF_NAME, CONF_RADIUS, CONF_URL)
@@ -54,6 +55,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
+# pylint: disable=unused-argument
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Set up the GeoRSS component."""
     home_latitude = hass.config.latitude
@@ -155,6 +157,7 @@ class GeoRssServiceData(object):
     def __init__(self, home_latitude, home_longitude, url, radius_in_km):
         """Initialize the update service."""
         self._home_coordinates = [home_latitude, home_longitude]
+        self._geo_distance_helper = GeoDistanceHelper(self._home_coordinates)
         self._url = url
         self._radius_in_km = radius_in_km
         self.events = None
@@ -184,7 +187,8 @@ class GeoRssServiceData(object):
                 point = namedtuple('Point', ['type', 'coordinates'])
                 geometry = point('Point', coordinates)
             if geometry:
-                distance = self.calculate_distance_to_geometry(geometry)
+                distance = self._geo_distance_helper.distance_to_geometry(
+                    geometry)
                 if distance <= self._radius_in_km:
                     event = {
                         ATTR_CATEGORY: None if not hasattr(
@@ -196,44 +200,3 @@ class GeoRssServiceData(object):
                     events.append(event)
         _LOGGER.debug("%s events found nearby", len(events))
         return events
-
-    def calculate_distance_to_geometry(self, geometry):
-        """Calculate the distance between HA and provided geometry."""
-        distance = float("inf")
-        if geometry.type == 'Point':
-            distance = self.calculate_distance_to_point(geometry)
-        elif geometry.type == 'Polygon':
-            distance = self.calculate_distance_to_polygon(
-                geometry.coordinates[0])
-        else:
-            _LOGGER.warning("Not yet implemented: %s", geometry.type)
-        return distance
-
-    def calculate_distance_to_point(self, point):
-        """Calculate the distance between HA and the provided point."""
-        # Swap coordinates to match: (lat, lon).
-        coordinates = (point.coordinates[1], point.coordinates[0])
-        return self.calculate_distance_to_coords(coordinates)
-
-    def calculate_distance_to_coords(self, coordinates):
-        """Calculate the distance between HA and the provided coordinates."""
-        # Expecting coordinates in format: (lat, lon).
-        from haversine import haversine
-        distance = haversine(coordinates, self._home_coordinates)
-        _LOGGER.debug("Distance from %s to %s: %s km", self._home_coordinates,
-                      coordinates, distance)
-        return distance
-
-    def calculate_distance_to_polygon(self, polygon):
-        """Calculate the distance between HA and the provided polygon."""
-        distance = float("inf")
-        # Calculate distance from polygon by calculating the distance
-        # to each point of the polygon but not to each edge of the
-        # polygon; should be good enough
-        for polygon_point in polygon:
-            coordinates = (polygon_point[1], polygon_point[0])
-            distance = min(distance,
-                           self.calculate_distance_to_coords(coordinates))
-        _LOGGER.debug("Distance from %s to %s: %s km", self._home_coordinates,
-                      polygon, distance)
-        return distance
