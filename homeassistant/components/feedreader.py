@@ -138,7 +138,9 @@ class FeedManager(object):
                 self._update_and_fire_entry(entry)
                 new_entries = True
             else:
-                _LOGGER.debug("Entry %s already processed", entry.title)
+                title = "'undefined title'" if not hasattr(entry, 'title') \
+                    else entry.title
+                _LOGGER.debug("Entry %s already processed", title)
         if not new_entries:
             self._log_no_entries()
         self._firstrun = False
