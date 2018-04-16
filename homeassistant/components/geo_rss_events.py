@@ -231,6 +231,14 @@ class GeoRssFeedManager(FeedManager):
                                         entry, definition)
                                     keep_entry = False
                                     break
+                            else:
+                                # Discard entry because it does not contain
+                                # attribute
+                                _LOGGER.debug(
+                                    "Entry %s does not contain attribute %s",
+                                    entry, definition[CONF_FILTERS_ATTRIBUTE])
+                                keep_entry = False
+                                break
                     if keep_entry:
                         keep_entries.append(entry)
         # Publish summary of this update after filtering, for some level of
@@ -244,9 +252,13 @@ class GeoRssFeedManager(FeedManager):
         """Publish a summary for sensors to pick up."""
         entries_summary = []
         for entry in entries:
-            entry_details = {ATTR_TITLE: entry[ATTR_TITLE],
+            title = None if not hasattr(entry, ATTR_TITLE) \
+                else entry[ATTR_TITLE]
+            category = None if not hasattr(entry, ATTR_CATEGORY) \
+                else entry[ATTR_CATEGORY]
+            entry_details = {ATTR_TITLE: title,
                              ATTR_DISTANCE: entry[ATTR_DISTANCE],
-                             ATTR_CATEGORY: entry[ATTR_CATEGORY]}
+                             ATTR_CATEGORY: category}
             # Include any additional attributes in the summary
             if self._include_attributes_in_summary:
                 for attribute_name in self._include_attributes_in_summary:
