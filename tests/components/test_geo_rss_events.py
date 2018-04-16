@@ -1,5 +1,8 @@
 """The tests for the geo rss events component."""
 import unittest
+from genericpath import exists
+
+from os import remove
 
 from homeassistant.components.feedreader import StoredData
 from homeassistant.const import CONF_NAME, CONF_RADIUS, CONF_URL, \
@@ -47,6 +50,10 @@ class TestGeoRssEventsComponent(unittest.TestCase):
     def setUp(self):
         """Initialize values for this testcase class."""
         self.hass = get_test_home_assistant()
+        # Delete any previously stored data
+        data_file = self.hass.config.path("{}.pickle".format('geo_rss_events'))
+        if exists(data_file):
+            remove(data_file)
 
     def tearDown(self):
         """Stop everything that was started."""
@@ -156,7 +163,7 @@ class TestGeoRssEventsComponent(unittest.TestCase):
         """Test updating component object."""
         events = self.prepare_test()
         # Check entries
-        self.assertEqual(4, len(events))
+        self.assertEqual(6, len(events))
         assert events[0].data.get(geo_rss_events.ATTR_TITLE) == "Title 1"
         assert events[0].data.get(geo_rss_events.ATTR_CATEGORY) == "Category 1"
         self.assertAlmostEqual(
@@ -173,6 +180,14 @@ class TestGeoRssEventsComponent(unittest.TestCase):
         assert events[3].data.get(geo_rss_events.ATTR_CATEGORY) == "Category 6"
         self.assertAlmostEqual(
             events[3].data.get(geo_rss_events.ATTR_DISTANCE), 48.06, 0)
+        assert not hasattr(events[4].data, geo_rss_events.ATTR_TITLE)
+        assert events[4].data.get(geo_rss_events.ATTR_CATEGORY) == "Category 8"
+        self.assertAlmostEqual(
+            events[4].data.get(geo_rss_events.ATTR_DISTANCE), 116.782, 0)
+        assert events[5].data.get(geo_rss_events.ATTR_TITLE) == "Title 9"
+        assert not hasattr(events[5].data, geo_rss_events.ATTR_CATEGORY)
+        self.assertAlmostEqual(
+            events[5].data.get(geo_rss_events.ATTR_DISTANCE), 116.782, 0)
 
     def test_attributes(self):
         """Test extracting a custom attribute."""
@@ -187,11 +202,13 @@ class TestGeoRssEventsComponent(unittest.TestCase):
                                    include_attributes_in_summary=
                                    include_attributes_in_summary)
         # Check entries
-        self.assertEqual(4, len(events))
+        self.assertEqual(6, len(events))
         assert events[0].data.get('title_index') == '1'
         assert events[1].data.get('title_index') == '2'
         assert events[2].data.get('title_index') == '3'
         assert events[3].data.get('title_index') == '6'
+        assert events[4].data.get('title_index') == ''
+        assert events[5].data.get('title_index') == '9'
 
     def test_attributes_nonexistent_source(self):
         """Test extracting a custom attribute from a nonexistent source."""
@@ -203,11 +220,13 @@ class TestGeoRssEventsComponent(unittest.TestCase):
         }]
         events = self.prepare_test(attributes_definition=attributes_definition)
         # Check entries
-        self.assertEqual(4, len(events))
+        self.assertEqual(6, len(events))
         assert events[0].data.get('title_index') is ''
         assert events[1].data.get('title_index') is ''
         assert events[2].data.get('title_index') is ''
         assert events[3].data.get('title_index') is ''
+        assert events[4].data.get('title_index') is ''
+        assert events[5].data.get('title_index') is ''
 
     def test_filter(self):
         """Test a custom filter."""
@@ -218,9 +237,10 @@ class TestGeoRssEventsComponent(unittest.TestCase):
         }]
         events = self.prepare_test(filters_definition=filters_definition)
         # Check entries
-        self.assertEqual(2, len(events))
+        self.assertEqual(3, len(events))
         assert events[0].data.get(geo_rss_events.ATTR_TITLE) == 'Title 3'
         assert events[1].data.get(geo_rss_events.ATTR_TITLE) == 'Title 6'
+        assert events[2].data.get(geo_rss_events.ATTR_TITLE) == 'Title 9'
 
     def test_filter_nonexistent_attribute(self):
         """Test a custom filter on non-existent attribute."""
@@ -230,4 +250,4 @@ class TestGeoRssEventsComponent(unittest.TestCase):
         }]
         events = self.prepare_test(filters_definition=filters_definition)
         # Check entries
-        self.assertEqual(4, len(events))
+        self.assertEqual(0, len(events))
