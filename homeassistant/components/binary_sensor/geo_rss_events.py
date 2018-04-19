@@ -114,7 +114,8 @@ class GeoRssEventBinarySensor(BinarySensorDevice):
         # Compute the attributes from the filtered events.
         matrix = {}
         for entry in entries:
-            matrix[entry[ATTR_TITLE]] = '{:.0f}km'.format(
+            matrix[entry[ATTR_TITLE]] = "unknown" if not \
+                hasattr(entry, ATTR_DISTANCE) else '{:.0f}km'.format(
                 entry[ATTR_DISTANCE])
         self._state_attributes = matrix
         # 'On' if at least one remaining entry.
@@ -123,7 +124,6 @@ class GeoRssEventBinarySensor(BinarySensorDevice):
 
     def update_callback(self):
         """Schedule a state update."""
-        _LOGGER.warning("Called update_callback...")
         self.schedule_update_ha_state(True)
 
     @asyncio.coroutine
