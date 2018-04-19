@@ -27,11 +27,10 @@ REQUIREMENTS = ['feedparser==5.2.1', 'haversine==0.4.5']
 
 _LOGGER = logging.getLogger(__name__)
 
+ATTR_CATEGORIES = "categories"
 ATTR_CATEGORY = 'category'
 ATTR_DISTANCE = 'distance'
-ATTR_ENTRIES = 'entries'
-ATTR_FEED_URL = 'feed_url'
-ATTR_NAME = 'name'
+ATTR_MANAGER = "manager"
 ATTR_TITLE = 'title'
 
 CONF_CATEGORIES = 'categories'
@@ -43,7 +42,6 @@ CONF_CUSTOM_ATTRIBUTE = 'custom_attribute'
 CONF_FILTERS = 'filters'
 CONF_FILTERS_ATTRIBUTE = 'attribute'
 CONF_FILTERS_REGEXP = 'regexp'
-CONF_INCLUDE_ATTRIBUTES_IN_SUMMARY = 'include_attributes_in_summary'
 CONF_SENSOR_CATEGORY = 'category'
 CONF_SENSOR_EVENT_TYPE = 'event_type'
 CONF_SENSOR_NAME = 'name'
@@ -79,8 +77,6 @@ CONFIG_SCHEMA = vol.Schema({
             vol.All(cv.ensure_list, [ATTRIBUTES_SCHEMA]),
         vol.Optional(CONF_FILTERS, default=[]):
             vol.All(cv.ensure_list, [FILTERS_SCHEMA]),
-        vol.Optional(CONF_INCLUDE_ATTRIBUTES_IN_SUMMARY, default=[]):
-            vol.All(cv.ensure_list, [cv.string]),
     }])
 }, extra=vol.ALLOW_EXTRA)
 
@@ -92,6 +88,7 @@ def setup(hass, config):
     data_file = hass.config.path("{}.pickle".format(DOMAIN))
     storage = StoredData(data_file)
     # Initialise each feed separately.
+    feeds = []
     for feed_config in config.get(DOMAIN):
         url = feed_config.get(CONF_URL)
         radius_in_km = feed_config.get(CONF_RADIUS)
@@ -100,44 +97,18 @@ def setup(hass, config):
         categories = feed_config.get(CONF_CATEGORIES)
         attributes_definition = feed_config.get(CONF_ATTRIBUTES)
         filters_definition = feed_config.get(CONF_FILTERS)
-        include_attributes_in_summary = feed_config.get(
-            CONF_INCLUDE_ATTRIBUTES_IN_SUMMARY)
-        # Remove default attributes because they will be included regardless.
-        if ATTR_CATEGORY in include_attributes_in_summary:
-            include_attributes_in_summary.remove(ATTR_CATEGORY)
-        if ATTR_DISTANCE in include_attributes_in_summary:
-            include_attributes_in_summary.remove(ATTR_DISTANCE)
-        if ATTR_TITLE in include_attributes_in_summary:
-            include_attributes_in_summary.remove(ATTR_TITLE)
         _LOGGER.debug("latitude=%s, longitude=%s, url=%s, radius=%s",
                       home_latitude, home_longitude, url, radius_in_km)
         # Intantiate feed manager for each configured feed.
         manager = GeoRssFeedManager(hass, storage, scan_interval, name,
                                     home_latitude, home_longitude, url,
                                     radius_in_km, attributes_definition,
-                                    filters_definition,
-                                    include_attributes_in_summary)
-        # And load sensors.
-        if categories:
-            for category in categories:
-                discovery.load_platform(hass, "binary_sensor", DOMAIN,
-                                        {
-                                            CONF_SENSOR_NAME:
-                                                '{} {}'.format(manager.name,
-                                                               category),
-                                            CONF_SENSOR_EVENT_TYPE:
-                                                manager.summary_event_type,
-                                            CONF_SENSOR_CATEGORY: category
-                                        },
-                                        config)
-        else:
-            discovery.load_platform(hass, "binary_sensor", DOMAIN,
-                                    {
-                                        CONF_SENSOR_NAME: manager.name,
-                                        CONF_SENSOR_EVENT_TYPE:
-                                            manager.summary_event_type
-                                    },
-                                    config)
+                                    filters_definition)
+        feed = {ATTR_MANAGER: manager, ATTR_CATEGORIES: categories}
+        feeds.append(feed)
+    hass.data[DOMAIN] = feeds
+    # And load sensors.
+    discovery.load_platform(hass, "binary_sensor", DOMAIN, None, config)
     return True
 
 
@@ -146,7 +117,7 @@ class GeoRssFeedManager(FeedManager):
 
     def __init__(self, hass, storage, scan_interval, name, home_latitude,
                  home_longitude, url, radius_in_km, attributes_definition,
-                 filters_definition, include_attributes_in_summary):
+                 filters_definition):
         """Initialize the GeoRSS Feed Manager."""
         self._scan_interval = scan_interval
         super().__init__(url, hass, storage)
@@ -156,11 +127,10 @@ class GeoRssFeedManager(FeedManager):
         self._radius_in_km = radius_in_km
         self._attributes_definition = attributes_definition
         self._filters_definition = filters_definition
-        self._include_attributes_in_summary = include_attributes_in_summary
         entity_id = generate_entity_id('{}', name, hass=hass)
-        self._event_type = entity_id + "_entry"
-        self._summary_event_type = entity_id + "_summary"
+        self._event_type = entity_id
         self._feed_id = entity_id
+        self._update_listeners = []
 
     @property
     def name(self):
@@ -168,9 +138,9 @@ class GeoRssFeedManager(FeedManager):
         return self._name
 
     @property
-    def summary_event_type(self):
-        """Return the summary event type."""
-        return self._summary_event_type
+    def feed_entries(self):
+        """Return the current set of feed entries."""
+        return [] if not hasattr(self._feed, 'entries') else self._feed.entries
 
     def _init_regular_updates(self, hass):
         """Schedule regular updates based on configured time interval."""
@@ -241,33 +211,16 @@ class GeoRssFeedManager(FeedManager):
                                 break
                     if keep_entry:
                         keep_entries.append(entry)
-        # Publish summary of this update after filtering, for some level of
-        # backwards compatibility with the geo_rss_events sensor
-        self._publish_summary(keep_entries)
         _LOGGER.debug("%s entries found nearby after filtering",
                       len(keep_entries))
         self._feed.entries = keep_entries
+        # Update connected sensors.
+        for listener in self._update_listeners:
+            listener()
 
-    def _publish_summary(self, entries):
-        """Publish a summary for sensors to pick up."""
-        entries_summary = []
-        for entry in entries:
-            title = None if not hasattr(entry, ATTR_TITLE) \
-                else entry[ATTR_TITLE]
-            category = None if not hasattr(entry, ATTR_CATEGORY) \
-                else entry[ATTR_CATEGORY]
-            entry_details = {ATTR_TITLE: title,
-                             ATTR_DISTANCE: entry[ATTR_DISTANCE],
-                             ATTR_CATEGORY: category}
-            # Include any additional attributes in the summary
-            if self._include_attributes_in_summary:
-                for attribute_name in self._include_attributes_in_summary:
-                    entry_details[attribute_name] = entry[attribute_name]
-            entries_summary.append(entry_details)
-        # Construct payload to be sent in the event.
-        payload = {ATTR_NAME: self._name, ATTR_FEED_URL: self._url,
-                   ATTR_ENTRIES: entries_summary}
-        self._hass.bus.fire(self._summary_event_type, payload)
+    def add_update_listener(self, listener):
+        """Add a listener for update notifications."""
+        self._update_listeners.append(listener)
 
 
 class GeoDistanceHelper(object):

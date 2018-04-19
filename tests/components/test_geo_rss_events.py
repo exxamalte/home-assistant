@@ -3,6 +3,7 @@ import unittest
 from genericpath import exists
 
 from os import remove
+from unittest.mock import MagicMock
 
 from homeassistant.components.feedreader import StoredData
 from homeassistant.const import CONF_NAME, CONF_RADIUS, CONF_URL, \
@@ -25,16 +26,6 @@ VALID_CONFIG_2 = {
     }]
 }
 VALID_CONFIG_3 = {
-    geo_rss_events.DOMAIN: [{
-        CONF_NAME: 'Name 1',
-        CONF_URL: URL,
-        CONF_RADIUS: 100.0,
-        geo_rss_events.CONF_INCLUDE_ATTRIBUTES_IN_SUMMARY: [
-            geo_rss_events.ATTR_CATEGORY, geo_rss_events.ATTR_DISTANCE,
-            geo_rss_events.ATTR_TITLE]
-    }]
-}
-VALID_CONFIG_4 = {
     geo_rss_events.DOMAIN: [{
         CONF_NAME: 'Name 1',
         CONF_URL: URL,
@@ -77,17 +68,11 @@ class TestGeoRssEventsComponent(unittest.TestCase):
                 'friendly_name': 'Name 1'
             })
 
-    def test_setup_with_default_include_attributes(self):
-        """Test the setup with default include attributes."""
-        with assert_setup_component(1, 'geo_rss_events'):
-            self.assertTrue(setup_component(self.hass, geo_rss_events.DOMAIN,
-                                            VALID_CONFIG_3))
-
     def test_setup_with_categories(self):
         """Test the setup with categories explicitly defined."""
         with assert_setup_component(1, 'geo_rss_events'):
             self.assertTrue(setup_component(self.hass, geo_rss_events.DOMAIN,
-                                            VALID_CONFIG_4))
+                                            VALID_CONFIG_3))
         self.hass.block_till_done()
         self.assertEqual(
             dict(self.hass.states.get('binary_sensor.name_1_category_1')
@@ -102,34 +87,29 @@ class TestGeoRssEventsComponent(unittest.TestCase):
                 'friendly_name': 'Name 1 Category 2'
             })
 
-    def setup_data(self, url='url', name=geo_rss_events.DEFAULT_NAME,
-                   scan_interval=geo_rss_events.DEFAULT_SCAN_INTERVAL,
-                   attributes_definition=None, filters_definition=None,
-                   include_attributes_in_summary=None):
+    def setup_manager(self, url='url', name=geo_rss_events.DEFAULT_NAME,
+                      scan_interval=geo_rss_events.DEFAULT_SCAN_INTERVAL,
+                      attributes_definition=None, filters_definition=None):
         """Set up data object for use by sensors."""
         if attributes_definition is None:
             attributes_definition = []
-        if include_attributes_in_summary is None:
-            include_attributes_in_summary = []
         home_latitude = -33.865
         home_longitude = 151.209444
         data_file = self.hass.config.path("{}.pickle".format(
             geo_rss_events.DOMAIN))
         storage = StoredData(data_file)
         radius_in_km = 500
-        data = geo_rss_events.GeoRssFeedManager(self.hass, storage,
-                                                scan_interval, name,
-                                                home_latitude,
-                                                home_longitude, url,
-                                                radius_in_km,
-                                                attributes_definition,
-                                                filters_definition,
-                                                include_attributes_in_summary)
-        return data
+        manager = geo_rss_events.GeoRssFeedManager(self.hass, storage,
+                                                   scan_interval, name,
+                                                   home_latitude,
+                                                   home_longitude, url,
+                                                   radius_in_km,
+                                                   attributes_definition,
+                                                   filters_definition)
+        return manager
 
     def prepare_test(self, attributes_definition=None,
-                     filters_definition=None,
-                     include_attributes_in_summary=None):
+                     filters_definition=None):
         """Run generic test with a configuration as provided."""
         events = []
 
@@ -140,23 +120,26 @@ class TestGeoRssEventsComponent(unittest.TestCase):
 
         name = "Name 1"
         feed_id = "name_1"
-        event_type = feed_id + "_entry"
+        event_type = feed_id
         self.hass.bus.listen(event_type, record_event)
         # Loading raw data from fixture and plug in to data object as URL
         # works since the third-party feedparser library accepts a URL
         # as well as the actual data.
         raw_data = load_fixture('geo_rss_events.xml')
-        data = self.setup_data(raw_data, name=name,
-                               attributes_definition=attributes_definition,
-                               filters_definition=filters_definition,
-                               include_attributes_in_summary=
-                               include_attributes_in_summary)
-        assert data._event_type == event_type
-        assert data._feed_id == feed_id
+        manager = self.setup_manager(raw_data, name=name,
+                                     attributes_definition=
+                                     attributes_definition,
+                                     filters_definition=filters_definition)
+        assert manager._event_type == event_type
+        assert manager._feed_id == feed_id
+        update_callback = MagicMock()
+        manager.add_update_listener(update_callback)
         # Artificially trigger update.
         self.hass.bus.fire(EVENT_HOMEASSISTANT_START)
-        # Collect events
+        # Collect events.
         self.hass.block_till_done()
+        update_callback.assert_called_once()
+        assert manager.feed_entries is not None
         return events
 
     def test_update_component(self):
@@ -197,10 +180,7 @@ class TestGeoRssEventsComponent(unittest.TestCase):
             geo_rss_events.CONF_ATTRIBUTES_REGEXP:
                 '(?P<' + geo_rss_events.CONF_CUSTOM_ATTRIBUTE + '>\d+)'
         }]
-        include_attributes_in_summary = ['title_index']
-        events = self.prepare_test(attributes_definition=attributes_definition,
-                                   include_attributes_in_summary=
-                                   include_attributes_in_summary)
+        events = self.prepare_test(attributes_definition=attributes_definition)
         # Check entries
         self.assertEqual(6, len(events))
         assert events[0].data.get('title_index') == '1'
