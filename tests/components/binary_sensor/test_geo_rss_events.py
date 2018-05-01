@@ -41,6 +41,7 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         self.assertEqual(len(self.DEVICES), 1)
         sensor = self.DEVICES[0]
         self.assertEqual(False, sensor.is_on)
+        self.assertEqual(False, sensor.should_poll)
         self.hass.add_job(sensor.async_added_to_hass())
         self.hass.block_till_done()
         manager.add_update_listener.assert_called_once()
@@ -53,7 +54,8 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
             update_method.assert_called_once()
 
     def setup_sensor(self, name, categories=None,
-                     include_entries_in_payload=True):
+                     include_entries_in_payload=True,
+                     last_update_successful=True):
         """Set up sensor for test."""
         manager = mock.MagicMock()
         if include_entries_in_payload:
@@ -70,6 +72,7 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         else:
             manager.configure_mock(feed_entries=[])
         manager.configure_mock(name=name)
+        manager.configure_mock(last_update_successful=last_update_successful)
         self.hass.data[DOMAIN] = [{ATTR_MANAGER: manager,
                                    ATTR_CATEGORIES: categories}]
         setup_platform(self.hass, None, self.add_devices, None)
@@ -88,8 +91,15 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         sensor = self.setup_sensor(name)
         self.assertEqual(name, sensor.name)
         self.assertEqual(True, sensor.is_on)
-        self.assertEqual(str({'Entry 1': '25km', 'Entry 2': '35km',
-                              'Entry 3': '15km'}),
+        self.assertEqual(str({'entries': [{'title': 'Entry 1',
+                                           'distance': 25.0,
+                                           'category': 'Category 1'},
+                                          {'title': 'Entry 2',
+                                           'distance': 35.0,
+                                           'category': 'Category 1'},
+                                          {'title': 'Entry 3',
+                                           'distance': 15.0,
+                                           'category': 'Category 2'}]}),
                          str(sensor.device_state_attributes))
 
     @mock.patch('homeassistant.core.StateMachine.get', attributes={})
@@ -100,7 +110,18 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         sensor = self.setup_sensor(name, include_entries_in_payload=False)
         self.assertEqual(name, sensor.name)
         self.assertEqual(False, sensor.is_on)
-        self.assertEqual(str({}), str(sensor.device_state_attributes))
+        self.assertEqual(str({'entries': []}),
+                         str(sensor.device_state_attributes))
+
+    @mock.patch('homeassistant.core.StateMachine.get', attributes={})
+    @mock.patch('homeassistant.components.binary_sensor.geo_rss_events.'
+                'async_call_later')
+    def test_sensor_with_failed_feed(self, mock_call_later, mock_get):
+        name = "Name 1"
+        sensor = self.setup_sensor(name, last_update_successful=False)
+        self.assertEqual(name, sensor.name)
+        self.assertEqual(False, sensor.is_on)
+        mock_call_later.assert_called_once()
 
     @mock.patch('homeassistant.core.StateMachine.get',
                 return_value=mock.Mock(attributes={
@@ -112,8 +133,15 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         sensor = self.setup_sensor(name)
         self.assertEqual(name, sensor.name)
         self.assertEqual(True, sensor.is_on)
-        self.assertEqual(str({'Entry 3': '15km', 'Entry 1': '25km',
-                              'Entry 2': '35km'}),
+        self.assertEqual(str({'entries': [{'title': 'Entry 3',
+                                           'distance': 15.0,
+                                           'category': 'Category 2'},
+                                          {'title': 'Entry 1',
+                                           'distance': 25.0,
+                                           'category': 'Category 1'},
+                                          {'title': 'Entry 2',
+                                           'distance': 35.0,
+                                           'category': 'Category 1'}]}),
                          str(sensor.device_state_attributes))
 
     @mock.patch('homeassistant.core.StateMachine.get',
@@ -126,8 +154,15 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         sensor = self.setup_sensor(name)
         self.assertEqual(name, sensor.name)
         self.assertEqual(True, sensor.is_on)
-        self.assertEqual(str({'Entry 1': '25km', 'Entry 2': '35km',
-                              'Entry 3': '15km'}),
+        self.assertEqual(str({'entries': [{'title': 'Entry 1',
+                                           'distance': 25.0,
+                                           'category': 'Category 1'},
+                                          {'title': 'Entry 2',
+                                           'distance': 35.0,
+                                           'category': 'Category 1'},
+                                          {'title': 'Entry 3',
+                                           'distance': 15.0,
+                                           'category': 'Category 2'}]}),
                          str(sensor.device_state_attributes))
 
     @mock.patch('homeassistant.core.StateMachine.get',
@@ -141,8 +176,15 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         sensor = self.setup_sensor(name)
         self.assertEqual(name, sensor.name)
         self.assertEqual(True, sensor.is_on)
-        self.assertEqual(str({'Entry 2': '35km', 'Entry 1': '25km',
-                              'Entry 3': '15km'}),
+        self.assertEqual(str({'entries': [{'title': 'Entry 2',
+                                           'distance': 35.0,
+                                           'category': 'Category 1'},
+                                          {'title': 'Entry 1',
+                                           'distance': 25.0,
+                                           'category': 'Category 1'},
+                                          {'title': 'Entry 3',
+                                           'distance': 15.0,
+                                           'category': 'Category 2'}]}),
                          str(sensor.device_state_attributes))
 
     @mock.patch('homeassistant.core.StateMachine.get',
@@ -155,7 +197,12 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         sensor = self.setup_sensor(name, categories=[category])
         self.assertEqual(name + " " + category, sensor.name)
         self.assertEqual(True, sensor.is_on)
-        self.assertEqual(str({'Entry 1': '25km', 'Entry 2': '35km'}),
+        self.assertEqual(str({'entries': [{'title': 'Entry 1',
+                                           'distance': 25.0,
+                                           'category': 'Category 1'},
+                                          {'title': 'Entry 2',
+                                           'distance': 35.0,
+                                           'category': 'Category 1'}]}),
                          str(sensor.device_state_attributes))
 
     @mock.patch('homeassistant.core.StateMachine.get',
@@ -168,4 +215,5 @@ class TestGeoRssEventsBinarySensor(unittest.TestCase):
         sensor = self.setup_sensor(name, categories=[category])
         self.assertEqual(name + " " + category, sensor.name)
         self.assertEqual(False, sensor.is_on)
-        self.assertEqual(str({}), str(sensor.device_state_attributes))
+        self.assertEqual(str({'entries': []}),
+                         str(sensor.device_state_attributes))

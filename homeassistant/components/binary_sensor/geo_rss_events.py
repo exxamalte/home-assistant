@@ -16,7 +16,8 @@ import logging
 
 from homeassistant.components import geo_rss_events
 from homeassistant.components.geo_rss_events import ATTR_CATEGORY, \
-    ATTR_DISTANCE, ATTR_TITLE, ATTR_CATEGORIES, ATTR_MANAGER
+    ATTR_CATEGORIES, ATTR_MANAGER
+from homeassistant.helpers.event import async_call_later
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,58 +79,67 @@ class GeoRssEventBinarySensor(BinarySensorDevice):
         """Return the state attributes."""
         return self._state_attributes
 
+    @property
+    def should_poll(self) -> bool:
+        """Data update is triggered from Feed Manager."""
+        return False
+
     def update(self):
         """Read new state data from the feed manager."""
-        entries = self._manager.feed_entries
-        _LOGGER.debug("Entries received: %s", entries)
-        # If category defined, remove entries not matching this category.
-        if self._category:
-            entries = [entry for entry in entries if
-                       entry[ATTR_CATEGORY] == self._category]
-        _LOGGER.debug("Entries with category %s: %s", self._category,
-                      entries)
-        # Read configuration values from current sensor state.
-        current_state_attributes = self._hass.states.get(
-            self.entity_id).attributes
-        sort_entries_by = DEFAULT_SORT_ENTRIES_BY
-        if CONF_SORT_ENTRIES_BY in current_state_attributes:
-            sort_entries_by = current_state_attributes[
-                CONF_SORT_ENTRIES_BY]
-        sort_entries_reverse = DEFAULT_SORT_ENTRIES_REVERSE
-        if CONF_SORT_ENTRIES_REVERSE in current_state_attributes:
-            sort_entries_reverse = current_state_attributes[
-                CONF_SORT_ENTRIES_REVERSE]
-        # Sort entries if configured to do so.
-        if sort_entries_by is not None:
-            _LOGGER.debug("Sorting by %s", sort_entries_by)
-            min_object = MinType()
-            entries = sorted(entries,
-                             key=lambda my_entry:
-                             min_object if sort_entries_by not in my_entry
-                             or my_entry[sort_entries_by]
-                             is None else my_entry[sort_entries_by],
-                             reverse=sort_entries_reverse)
-        _LOGGER.debug("Entries after sorting by %s: %s", sort_entries_by,
-                      entries)
-        # Compute the attributes from the filtered events.
-        matrix = {}
-        for entry in entries:
-            matrix[entry[ATTR_TITLE]] = "unknown" if not \
-                hasattr(entry, ATTR_DISTANCE) else '{:.0f}km'.format(
-                entry[ATTR_DISTANCE])
-        self._state_attributes = matrix
-        # 'On' if at least one remaining entry.
-        # 'Off' if no entries left after filtering.
-        self._state = (len(entries) != 0)
+        if self._manager.last_update_successful:
+            entries = self._manager.feed_entries
+            _LOGGER.debug("Entries received: %s", entries)
+            # If category defined, remove entries not matching this category.
+            if self._category:
+                entries = [entry for entry in entries if
+                           entry[ATTR_CATEGORY] == self._category]
+            _LOGGER.debug("Entries with category %s: %s", self._category,
+                          entries)
+            # Read configuration values from current sensor state.
+            current_state_attributes = self._hass.states.get(
+                self.entity_id).attributes
+            sort_entries_by = DEFAULT_SORT_ENTRIES_BY
+            if CONF_SORT_ENTRIES_BY in current_state_attributes:
+                sort_entries_by = current_state_attributes[
+                    CONF_SORT_ENTRIES_BY]
+            sort_entries_reverse = DEFAULT_SORT_ENTRIES_REVERSE
+            if CONF_SORT_ENTRIES_REVERSE in current_state_attributes:
+                sort_entries_reverse = current_state_attributes[
+                    CONF_SORT_ENTRIES_REVERSE]
+            # Sort entries if configured to do so.
+            if sort_entries_by is not None:
+                _LOGGER.debug("Sorting by %s", sort_entries_by)
+                min_object = MinType()
+                entries = sorted(entries,
+                                 key=lambda my_entry:
+                                 min_object if sort_entries_by not in my_entry
+                                 or my_entry[sort_entries_by]
+                                 is None else my_entry[sort_entries_by],
+                                 reverse=sort_entries_reverse)
+            _LOGGER.debug("Entries after sorting by %s: %s", sort_entries_by,
+                          entries)
+            # Add entries as attribute.
+            self._state_attributes['entries'] = entries
+            # 'on' if at least one remaining entry.
+            # 'off' if no entries left after filtering.
+            self._state = (len(entries) != 0)
+        else:
+            _LOGGER.debug("Unable to update sensor %s because feed manager's "
+                          "last update was unsuccessful", self.entity_id)
+            # Try to update again in 30 seconds.
+            async_call_later(self._hass, 30, self.update)
 
     def update_callback(self):
         """Schedule a state update."""
+        _LOGGER.debug("Update to be scheduled for %s", self.entity_id)
         self.schedule_update_ha_state(True)
 
     @asyncio.coroutine
     def async_added_to_hass(self):
         """Add callback after being added to hass."""
         self._manager.add_update_listener(self.update_callback)
+        _LOGGER.debug("Listener for %s added to %s", self.entity_id,
+                      self._manager)
 
 
 @total_ordering

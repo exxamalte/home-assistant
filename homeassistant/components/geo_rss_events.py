@@ -214,9 +214,14 @@ class GeoRssFeedManager(FeedManager):
         _LOGGER.debug("%s entries found nearby after filtering",
                       len(keep_entries))
         self._feed.entries = keep_entries
-        # Update connected sensors.
-        for listener in self._update_listeners:
-            listener()
+
+    def _update(self):
+        """Update the feed and then update connected sensors/listeners."""
+        super()._update()
+        if self._last_update_successful:
+            # Update connected sensors.
+            for listener in self._update_listeners:
+                listener()
 
     def add_update_listener(self, listener):
         """Add a listener for update notifications."""
