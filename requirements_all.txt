@@ -391,6 +391,9 @@ fitbit==0.3.0
 # homeassistant.components.sensor.fixer
 fixerio==1.0.0a0
 
+# homeassistant.components.geo_location.flightradar24_flights_feed
+flightradar24_client==0.3
+
 # homeassistant.components.light.flux_led
 flux_led==0.22
 
