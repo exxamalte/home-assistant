@@ -84,12 +84,15 @@ class Flightradar24FlightsFeedEntityManager:
     def __init__(self, hass, add_entities, scan_interval, coordinates,
                  host, port, radius_in_km):
         """Initialize the Feed Entity Manager."""
-        from flightradar24_client.fr24_flights \
-            import Flightradar24FlightsFeedManager
+        # from flightradar24_client.fr24_flights \
+        #     import Flightradar24FlightsFeedManager
+        from flightradar24_client.dump1090_aircrafts \
+            import Dump1090AircraftsFeedManager
 
         self._hass = hass
         session = async_get_clientsession(hass)
-        self._feed_manager = Flightradar24FlightsFeedManager(
+        # self._feed_manager = Flightradar24FlightsFeedManager(
+        self._feed_manager = Dump1090AircraftsFeedManager(
             self._generate_entity, self._update_entity, self._remove_entity,
             coordinates, filter_radius=radius_in_km, hostname=host, port=port,
             session=session, loop=hass.loop)
