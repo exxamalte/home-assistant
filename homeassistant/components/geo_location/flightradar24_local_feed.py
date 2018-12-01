@@ -1,8 +1,8 @@
 """
-Flightradar24 Flights Feed platform.
+Flightradar24 Local Flights Feed platform.
 
 For more details about this platform, please refer to the documentation at
-https://home-assistant.io/components/geo_location/flightradar24_flights_feed/
+https://home-assistant.io/components/geo_location/flightradar24_local_feed/
 """
 from datetime import timedelta
 import logging
@@ -13,17 +13,16 @@ import voluptuous as vol
 from homeassistant.components.geo_location import (
     PLATFORM_SCHEMA, GeoLocationEvent)
 from homeassistant.const import (
-    CONF_RADIUS, CONF_SCAN_INTERVAL,
-    EVENT_HOMEASSISTANT_START, CONF_LATITUDE, CONF_LONGITUDE, CONF_HOST,
-    CONF_PORT)
+    CONF_HOST, CONF_LATITUDE, CONF_LONGITUDE, CONF_PORT, CONF_RADIUS,
+    CONF_SCAN_INTERVAL, EVENT_HOMEASSISTANT_START)
 from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import (
-    async_dispatcher_connect, dispatcher_send)
+    async_dispatcher_connect, dispatcher_send, async_dispatcher_send)
 from homeassistant.helpers.event import async_track_time_interval
 
-REQUIREMENTS = ['flightradar24_client==0.3']
+REQUIREMENTS = ['flightradar24_client==0.4a5']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,22 +34,28 @@ ATTR_TRACK = 'track'
 ATTR_VERTICAL_RATE = 'vertical_rate'
 ATTR_UPDATED = 'updated'
 
+CONF_MODE = 'mode'
+
 DEFAULT_HOST = 'localhost'
+DEFAULT_MODE = 'flightradar24'
 DEFAULT_PORT = 8754
 DEFAULT_RADIUS_IN_KM = 50.0
 DEFAULT_UNIT_OF_MEASUREMENT = 'km'
 
 SCAN_INTERVAL = timedelta(seconds=15)
 
-SIGNAL_DELETE_ENTITY = 'flightradar24_flights_feed_delete_{}'
-SIGNAL_UPDATE_ENTITY = 'flightradar24_flights_feed_update_{}'
+SIGNAL_DELETE_ENTITY = 'flightradar24_local_feed_delete_{}'
+SIGNAL_UPDATE_ENTITY = 'flightradar24_local_feed_update_{}'
 
-SOURCE = 'flightradar24_flights_feed'
+SOURCE = 'flightradar24_local_feed'
+
+VALID_MODES = ['flightradar24', 'dump1090']
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_LATITUDE): cv.latitude,
     vol.Optional(CONF_LONGITUDE): cv.longitude,
     vol.Optional(CONF_RADIUS, default=DEFAULT_RADIUS_IN_KM): vol.Coerce(float),
+    vol.Optional(CONF_MODE, default=DEFAULT_MODE): vol.In(VALID_MODES),
     vol.Optional(CONF_HOST, default=DEFAULT_HOST): cv.string,
     vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
 })
@@ -60,19 +65,19 @@ async def async_setup_platform(
         hass, config, async_add_entities, discovery_info=None):
     """Set up the Flightradar24 Flights Feed platform."""
     scan_interval = config.get(CONF_SCAN_INTERVAL, SCAN_INTERVAL)
-    host = config.get(CONF_HOST)
-    port = config.get(CONF_PORT)
+    mode = config.get(CONF_MODE)
+    host = config[CONF_HOST]
+    port = config[CONF_PORT]
     coordinates = (config.get(CONF_LATITUDE, hass.config.latitude),
                    config.get(CONF_LONGITUDE, hass.config.longitude))
     radius_in_km = config[CONF_RADIUS]
     # Initialize the entity manager.
     feed = Flightradar24FlightsFeedEntityManager(
-        hass, async_add_entities, scan_interval, coordinates, host, port,
+        hass, async_add_entities, scan_interval, coordinates, mode, host, port,
         radius_in_km)
 
     async def start_feed_manager(event):
         """Start feed manager."""
-        _LOGGER.debug("Startup called")
         await feed.startup()
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, start_feed_manager)
@@ -81,34 +86,36 @@ async def async_setup_platform(
 class Flightradar24FlightsFeedEntityManager:
     """Feed Entity Manager for Flightradar24 Flights feed."""
 
-    def __init__(self, hass, add_entities, scan_interval, coordinates,
-                 host, port, radius_in_km):
+    def __init__(self, hass, async_add_entities, scan_interval, coordinates,
+                 mode, host, port, radius_in_km):
         """Initialize the Feed Entity Manager."""
-        # from flightradar24_client.fr24_flights \
-        #     import Flightradar24FlightsFeedManager
-        from flightradar24_client.dump1090_aircrafts \
-            import Dump1090AircraftsFeedManager
-
         self._hass = hass
         session = async_get_clientsession(hass)
-        # self._feed_manager = Flightradar24FlightsFeedManager(
-        self._feed_manager = Dump1090AircraftsFeedManager(
-            self._generate_entity, self._update_entity, self._remove_entity,
-            coordinates, filter_radius=radius_in_km, hostname=host, port=port,
-            session=session, loop=hass.loop)
-        self._add_entities = add_entities
+        if mode == DEFAULT_MODE:
+            from flightradar24_client.fr24_flights \
+                import Flightradar24FlightsFeedManager
+            self._feed_manager = Flightradar24FlightsFeedManager(
+                self._generate_entity, self._update_entity,
+                self._remove_entity, coordinates, filter_radius=radius_in_km,
+                hostname=host, port=port, session=session, loop=hass.loop)
+        else:
+            from flightradar24_client.dump1090_aircrafts \
+                import Dump1090AircraftsFeedManager
+            self._feed_manager = Dump1090AircraftsFeedManager(
+                self._generate_entity, self._update_entity,
+                self._remove_entity, coordinates, filter_radius=radius_in_km,
+                hostname=host, port=port, session=session, loop=hass.loop)
+        self._async_add_entities = async_add_entities
         self._scan_interval = scan_interval
 
     async def startup(self):
         """Start up this manager."""
-        _LOGGER.debug("Starting up")
         await self._feed_manager.update(None)
         self._init_regular_updates()
 
     def _init_regular_updates(self):
         """Schedule regular updates at the specified interval."""
         async_track_time_interval(
-            #self._hass, lambda now: self._feed_manager.update(),
             self._hass, self._feed_manager.update,
             self._scan_interval)
 
@@ -116,19 +123,21 @@ class Flightradar24FlightsFeedEntityManager:
         """Get feed entry by external id."""
         return self._feed_manager.feed_entries.get(external_id)
 
-    def _generate_entity(self, external_id):
+    async def _generate_entity(self, external_id):
         """Generate new entity."""
         new_entity = Flightradar24Flight(self, external_id)
         # Add new entities to HA.
-        self._add_entities([new_entity], True)
+        self._async_add_entities([new_entity], True)
 
-    def _update_entity(self, external_id):
+    async def _update_entity(self, external_id):
         """Update entity."""
-        dispatcher_send(self._hass, SIGNAL_UPDATE_ENTITY.format(external_id))
+        async_dispatcher_send(
+            self._hass, SIGNAL_UPDATE_ENTITY.format(external_id))
 
-    def _remove_entity(self, external_id):
+    async def _remove_entity(self, external_id):
         """Remove entity."""
-        dispatcher_send(self._hass, SIGNAL_DELETE_ENTITY.format(external_id))
+        async_dispatcher_send(
+            self._hass, SIGNAL_DELETE_ENTITY.format(external_id))
 
 
 class Flightradar24Flight(GeoLocationEvent):
@@ -174,7 +183,7 @@ class Flightradar24Flight(GeoLocationEvent):
 
     @property
     def should_poll(self):
-        """No polling needed for USGS Earthquake events."""
+        """No polling needed for Flightradar24 events."""
         return False
 
     async def async_update(self):
