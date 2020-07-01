@@ -9,7 +9,7 @@ import voluptuous as vol
 from homeassistant.components.geo_location import PLATFORM_SCHEMA, GeolocationEvent
 from homeassistant.components.nsw_rural_fire_service_feed.const import (
     CONF_CATEGORIES,
-    DEFAULT_RADIUS_IN_KM,
+    DEFAULT_RADIUS,
     VALID_CATEGORIES,
 )
 from homeassistant.const import (
@@ -58,7 +58,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         ),
         vol.Optional(CONF_LATITUDE): cv.latitude,
         vol.Optional(CONF_LONGITUDE): cv.longitude,
-        vol.Optional(CONF_RADIUS, default=DEFAULT_RADIUS_IN_KM): vol.Coerce(float),
+        vol.Optional(CONF_RADIUS, default=DEFAULT_RADIUS): vol.Coerce(float),
     }
 )
 
