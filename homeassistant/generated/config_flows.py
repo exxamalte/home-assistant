@@ -109,6 +109,7 @@ FLOWS = [
     "netatmo",
     "nexia",
     "notion",
+    "nsw_rural_fire_service_feed",
     "nuheat",
     "nut",
     "nws",

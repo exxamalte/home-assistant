@@ -17,10 +17,16 @@ from .const import (  # pylint: disable=unused-import
     DEFAULT_RADIUS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    VALID_CATEGORIES,
 )
 
 DATA_SCHEMA = vol.Schema(
-    {vol.Optional(CONF_RADIUS, default=DEFAULT_RADIUS): cv.positive_int}
+    {
+        vol.Optional(CONF_RADIUS, default=DEFAULT_RADIUS): cv.positive_int,
+        vol.Optional(CONF_CATEGORIES, default=VALID_CATEGORIES): cv.multi_select(
+            VALID_CATEGORIES
+        ),
+    }
 )
 
 _LOGGER = logging.getLogger(__name__)
